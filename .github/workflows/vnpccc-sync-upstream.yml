@@ -1,0 +1,178 @@
+# vnpccc fork — tự bám bản Zitadel mới.
+#
+# Mỗi ngày: xem zitadel/zitadel có tag ổn định mới hơn tag mà nhánh
+# `vnpccc-i18n` đang bám không. Có thì rebase các commit i18n của ta lên tag
+# đó rồi push — push đó kích hoạt workflow build image.
+#
+# Rebase ĐỤNG ĐỘ thì DỪNG và mở issue, KHÔNG tự giải quyết: 4 file ta sửa đều
+# là logic chọn ngôn ngữ, đoán bừa là hỏng đăng nhập.
+# Upstream thêm chuỗi mới mà vi/zh-TW chưa dịch cũng mở issue (image vẫn dựng
+# được, next-intl rơi về tiếng Anh cho chuỗi thiếu).
+name: vnpccc — bám bản Zitadel mới
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 09:00 giờ VN mỗi ngày
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: "Ép rebase lên tag cụ thể (bỏ trống = tag ổn định mới nhất)"
+        type: string
+        required: false
+
+concurrency:
+  group: vnpccc-sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout nhánh vnpccc-i18n
+        uses: actions/checkout@v4
+        with:
+          ref: vnpccc-i18n
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tìm tag upstream mới nhất
+        id: find
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/zitadel/zitadel.git 2>/dev/null || true
+          git fetch --tags --quiet upstream
+
+          CURRENT=$(git describe --tags --abbrev=0 HEAD)
+          if [ -n "${{ inputs.target_tag }}" ]; then
+            TARGET="${{ inputs.target_tag }}"
+          else
+            # Chỉ tag ổn định vX.Y.Z — bỏ -rc/-alpha/-beta
+            TARGET=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -Ev '\-' | sort -V | tail -1)
+          fi
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" = "$TARGET" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Đang ở bản mới nhất ($CURRENT) — không làm gì."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Có bản mới: $CURRENT → $TARGET"
+          fi
+
+      - name: Rebase các commit i18n lên tag mới
+        id: rebase
+        if: steps.find.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rebase "${{ steps.find.outputs.target }}"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            git rebase --abort || true
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "Rebase đụng độ — cần xử lý tay."
+          fi
+
+      - name: Mở issue khi rebase đụng độ
+        if: steps.rebase.outputs.ok == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = "${{ steps.find.outputs.target }}";
+            const current = "${{ steps.find.outputs.current }}";
+            const title = `Rebase i18n lên ${target} bị đụng độ`;
+            const body = [
+              `Zitadel ra bản \`${target}\` (đang bám \`${current}\`), rebase tự động KHÔNG chạy được.`,
+              ``,
+              `Upstream đã sửa một trong các file ta cũng sửa:`,
+              `- \`apps/login/src/lib/i18n.ts\` (LANGS + matchLanguage)`,
+              `- \`apps/login/src/i18n/request.ts\` (chọn locale)`,
+              `- \`apps/login/src/lib/auth-utils.ts\` (ui_locales)`,
+              `- \`apps/login/src/app/(login)/layout.tsx\` (danh sách ngôn ngữ)`,
+              ``,
+              `Làm tay:`,
+              '```bash',
+              `git fetch upstream --tags`,
+              `git checkout vnpccc-i18n`,
+              `git rebase ${target}   # giải quyết đụng độ`,
+              `cd apps/login && npx vitest --run src/lib/i18n.test.ts src/lib/auth-utils.test.ts`,
+              `git push --force-with-lease`,
+              '```',
+            ].join("\n");
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "vnpccc-sync",
+            });
+            if (existing.some((i) => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ["vnpccc-sync"],
+            });
+
+      - uses: pnpm/action-setup@v4
+        if: steps.rebase.outputs.ok == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.rebase.outputs.ok == 'true'
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Cài dependencies
+        if: steps.rebase.outputs.ok == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Kiểm bản dịch + test i18n
+        id: verify
+        if: steps.rebase.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          node .github/scripts/vnpccc-check-locales.mjs | tee locale-report.txt
+          (cd apps/login && npx vitest --run src/lib/i18n.test.ts src/lib/auth-utils.test.ts)
+
+      - name: Push nhánh
+        if: steps.rebase.outputs.ok == 'true'
+        run: git push --force-with-lease origin vnpccc-i18n
+
+      - name: Gọi workflow build image
+        if: steps.rebase.outputs.ok == 'true'
+        uses: actions/github-script@v7
+        with:
+          # ⚠️ Push bằng GITHUB_TOKEN KHÔNG kích hoạt workflow khác (GitHub chặn
+          # đệ quy) → phải dispatch tay. workflow_dispatch và repository_dispatch
+          # là NGOẠI LỆ duy nhất, vẫn tạo run được với GITHUB_TOKEN.
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "vnpccc-login-image.yml",
+              ref: "vnpccc-i18n",
+              inputs: { push_latest: "true" },
+            });
+            core.info("Đã gọi build image cho ${{ steps.find.outputs.target }}");
+
+      - name: Báo khi bản dịch chưa đủ chuỗi mới
+        if: failure() && steps.rebase.outputs.ok == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = "${{ steps.find.outputs.target }}";
+            const title = `Bản ${target} có chuỗi mới chưa dịch (vi/zh-TW)`;
+            const body = [
+              `Rebase lên \`${target}\` OK nhưng cổng kiểm bản dịch không qua.`,
+              `Xem log job để biết khoá nào thiếu, rồi bổ sung vào:`,
+              `- \`apps/login/locales/vi.json\``,
+              `- \`apps/login/locales/zh-TW.json\``,
+              ``,
+              `Image CHƯA được dựng cho bản này — nhánh chưa push.`,
+            ].join("\n");
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "vnpccc-sync",
+            });
+            if (existing.some((i) => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ["vnpccc-sync"],
+            });

@@ -1,4 +1,4 @@
-import { LANGS } from "@/lib/i18n";
+import { matchLanguage } from "@/lib/i18n";
 
 /**
  * Authentication utility functions that don't require server actions
@@ -8,13 +8,16 @@ import { LANGS } from "@/lib/i18n";
  * Check if a language code is valid (supported by the login UI)
  */
 export function isValidLanguage(code: string): boolean {
-  const normalized = code.trim().toLowerCase();
-  return LANGS.some((lang) => lang.code === normalized);
+  return matchLanguage(code) !== null;
 }
 
 /**
  * Extract a valid language code from uiLocales array.
- * Returns the first valid language code (normalized to lowercase), or null if none found.
+ * Returns the canonical code of the first valid entry (e.g. "de" for "de-CH",
+ * "zh-TW" for "zh-Hant-TW", "zh" for "zh-Hans-CN"), or null if none found.
+ *
+ * vnpccc fork: regional variants are resolved through matchLanguage so that
+ * Traditional Chinese keeps its own locale instead of collapsing into "zh".
  */
 export function getValidLocaleFromUILocales(uiLocales: string[] | undefined): string | null {
   if (!uiLocales || uiLocales.length === 0) {
@@ -22,22 +25,9 @@ export function getValidLocaleFromUILocales(uiLocales: string[] | undefined): st
   }
 
   for (const locale of uiLocales) {
-    const normalized = locale.trim().toLowerCase();
-
-    // Check if the full locale is a valid language code (e.g., "de", "EN")
-    if (isValidLanguage(normalized)) {
-      return normalized;
-    }
-
-    // uiLocales may contain language tags like "en-US" or "de-CH"
-    // Extract the language code (part before the hyphen)
-    // Note: this strips any regional specifier
-    // e.g., de-CH and de-AT both become just de
-    // zh-Hans-CN (Simplified) and zh-Hant-TW (Traditional) both become zh
-    // As of time of writing, this is expected behaviour, since there is only one translation for all languages
-    const languageCode = normalized.split("-")[0];
-    if (isValidLanguage(languageCode)) {
-      return languageCode;
+    const match = matchLanguage(locale);
+    if (match) {
+      return match;
     }
   }
 
