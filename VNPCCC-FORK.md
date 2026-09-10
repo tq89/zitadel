@@ -91,6 +91,16 @@ upstream để lấy tag, không có bước push/PR nào về repo gốc.
 Đổi logic workflow thì sửa trên `main` rồi áp sang `vnpccc-i18n` (hoặc ngược
 lại) để hai bản không lệch nhau.
 
+### Tắt bớt CI của upstream trên fork (làm 1 lần)
+
+Đẩy lên `main` sẽ kích hoạt luôn workflow gốc của Zitadel. `CI` tự bỏ qua
+trên fork, nhưng **`Code Scanning` (CodeQL) thì chạy thật** — quét cả kho Go
+lẫn TypeScript, tốn hàng chục phút Actions mà chẳng để làm gì.
+
+Tắt: repo → **Actions** → chọn **Code Scanning** ở cột trái → nút `⋯` →
+**Disable workflow**. (Tắt luôn `CI` cho gọn cũng được — nó vốn đã tự bỏ qua.)
+KHÔNG tắt 2 workflow `vnpccc — …`.
+
 ### Tự bám bản mới
 `.github/workflows/vnpccc-sync-upstream.yml` chạy 09:00 giờ VN mỗi ngày:
 
