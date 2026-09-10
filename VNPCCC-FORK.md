@@ -69,9 +69,27 @@ khi rebase, trong khi cấu hình làm được y hệt.
 
 ## Bảo trì
 
-### Nhánh
-`vnpccc-i18n` = tag ổn định của upstream + các commit i18n ở trên. Không bao
-giờ merge vào `main`; `main` giữ nguyên để đối chiếu.
+### Hai nhánh, mỗi nhánh một việc
+
+| Nhánh | Là gì | Dùng để |
+|---|---|---|
+| **`main`** (mặc định) | upstream `main` + commit i18n | Xem code, và **chạy workflow theo lịch** |
+| **`vnpccc-i18n`** | **tag phát hành** của upstream + commit i18n | **Dựng image** |
+
+Vì sao phải tách:
+
+- Workflow `schedule` của GitHub **chỉ chạy từ nhánh mặc định** → file
+  `vnpccc-sync-upstream.yml` bắt buộc có mặt trên `main`, nếu không lịch
+  không bao giờ nổ.
+- Image phải mang **đúng số hiệu bản phát hành** để khớp core Zitadel.
+  `main` nằm giữa hai bản phát hành, `git describe` trên đó cho số hiệu sai
+  (hoặc không có) → chỉ dựng image từ `vnpccc-i18n` đang bám tag.
+
+**KHÔNG bao giờ đẩy ngược lên `zitadel/zitadel`.** Workflow chỉ `fetch` từ
+upstream để lấy tag, không có bước push/PR nào về repo gốc.
+
+Đổi logic workflow thì sửa trên `main` rồi áp sang `vnpccc-i18n` (hoặc ngược
+lại) để hai bản không lệch nhau.
 
 ### Tự bám bản mới
 `.github/workflows/vnpccc-sync-upstream.yml` chạy 09:00 giờ VN mỗi ngày:
