@@ -1,4 +1,4 @@
-import { LANGS, LANGUAGE_COOKIE_NAME, LANGUAGE_HEADER_NAME } from "@/lib/i18n";
+import { LANGS, LANGUAGE_COOKIE_NAME, LANGUAGE_HEADER_NAME, matchLanguage, resolveLocaleFromHeader } from "@/lib/i18n";
 import { getServiceConfig } from "@/lib/service-url";
 import { getAllowedLanguages, getHostedLoginTranslation } from "@/lib/zitadel";
 import { JsonObject } from "@zitadel/client";
@@ -33,17 +33,19 @@ export default getRequestConfig(async () => {
 
   const languageHeader = await (await headers()).get(LANGUAGE_HEADER_NAME);
   if (languageHeader) {
-    // splits "en-US,en;q=0.9" to ["en", "US"] or ["en"]
-    const headerLocale = languageHeader.split(",")[0].split("-")[0];
-    if (allowedLanguages.includes(headerLocale)) {
+    // vnpccc fork: keep regional variants ("zh-TW" must not collapse into
+    // "zh") and walk every tag the browser sent, not only the first one.
+    const headerLocale = resolveLocaleFromHeader(languageHeader, allowedLanguages);
+    if (headerLocale) {
       locale = headerLocale;
     }
   }
 
   const languageCookie = cookiesList?.get(LANGUAGE_COOKIE_NAME);
   if (languageCookie && languageCookie.value) {
-    if (allowedLanguages.includes(languageCookie.value)) {
-      locale = languageCookie.value;
+    const cookieLocale = matchLanguage(languageCookie.value, allowedLanguages);
+    if (cookieLocale) {
+      locale = cookieLocale;
     } else {
       // If the cookie tells a language that is other than the supported ones, fall back to the default.
       locale = defaultLanguage;

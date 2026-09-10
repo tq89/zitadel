@@ -1,0 +1,124 @@
+# vnpccc fork — dựng image Login v2 có 4 ngôn ngữ (en, 简体中文, 繁體中文, Tiếng Việt).
+#
+# Vì sao cần fork: danh sách ngôn ngữ của màn đăng nhập là HẰNG SỐ trong app
+# (apps/login/src/lib/i18n.ts). API SetHostedLoginTranslation chỉ ghi đè nội
+# dung cho ngôn ngữ ĐÃ có trong danh sách đó, không thêm được `vi`/`zh-TW`.
+#
+# Image ra: ghcr.io/<owner>/zitadel-login:<tag upstream>  (+ :latest)
+# Tag image = ĐÚNG version Zitadel core mà nó khớp — core và login BẮT BUỘC
+# cùng version (xem README-ZITADEL.md của repo nnpccc).
+name: vnpccc — build image Login
+
+on:
+  push:
+    branches: ["vnpccc-i18n"]
+    paths:
+      - "apps/login/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/vnpccc-login-image.yml"
+  workflow_dispatch:
+    inputs:
+      push_latest:
+        description: "Gắn thêm tag :latest"
+        type: boolean
+        default: true
+
+concurrency:
+  group: vnpccc-login-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # cần tag upstream để suy ra version
+
+      - name: Suy ra version upstream đang bám
+        id: ver
+        run: |
+          set -euo pipefail
+          # Fork KHÔNG có tag của upstream (fork chỉ sao chép nhánh) → phải lấy
+          # tag từ zitadel/zitadel, nếu không `git describe` báo
+          # "No names found" và job chết ngay (đã dính 2026-09-10).
+          git remote add upstream https://github.com/zitadel/zitadel.git 2>/dev/null || true
+          git fetch --tags --quiet upstream
+          # Nhánh vnpccc-i18n = tag upstream + các commit i18n của ta
+          # → tag gần nhất trong lịch sử CHÍNH LÀ version core cần khớp.
+          TAG=$(git describe --tags --abbrev=0 HEAD)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Bám upstream: $TAG"
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Cài dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Kiểm bản dịch đủ khoá + đúng placeholder
+        run: node .github/scripts/vnpccc-check-locales.mjs
+
+      - name: Test đơn vị phần i18n
+        working-directory: apps/login
+        run: npx vitest --run src/lib/i18n.test.ts src/lib/auth-utils.test.ts
+
+      - name: Build Login standalone
+        run: pnpm nx run --nxBail @zitadel/login:build
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Đăng nhập GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag + label cho image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/zitadel-login
+          labels: |
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.title=vnpccc Zitadel Login (vi/zh-TW)
+            org.opencontainers.image.description=Zitadel Login v2 ${{ steps.ver.outputs.tag }} + Tiếng Việt và 繁體中文
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.tag }}
+            type=sha,prefix=,format=long
+            type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' || inputs.push_latest }}
+
+      - name: Build + push image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/login
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha,scope=vnpccc-login
+          cache-to: type=gha,mode=max,scope=vnpccc-login
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Tóm tắt
+        run: |
+          {
+            echo "### Image đã đẩy"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "Trên VPS: sửa \`vps-zitadel/docker-compose.yml\` → \`zitadel-login.image: ghcr.io/${{ github.repository_owner }}/zitadel-login:${{ steps.ver.outputs.tag }}\`"
+            echo "và ĐỔI CẢ core \`ghcr.io/zitadel/zitadel:${{ steps.ver.outputs.tag }}\` cho khớp version."
+          } >> "$GITHUB_STEP_SUMMARY"

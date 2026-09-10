@@ -6,7 +6,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { Skeleton } from "@/components/skeleton";
 import { ThemeProvider } from "@/components/theme-provider";
 import ThemeSwitch from "@/components/theme-switch";
-import { LANGS, getLanguage } from "@/lib/i18n";
+import { LANGS, getLanguage, matchLanguage } from "@/lib/i18n";
 import { getServiceConfig } from "@/lib/service-url";
 import { getAllowedLanguages } from "@/lib/zitadel";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -34,9 +34,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   try {
     const settings = await getAllowedLanguages({ serviceConfig });
     if (settings.allowedLanguages?.length) {
+      // vnpccc fork: match case-insensitively ("zh-tw" from the restriction
+      // list must still light up the "zh-TW" entry)
       languages = settings.allowedLanguages
-        .filter((code) => LANGS.find((l) => l.code === code))
-        .map((code) => getLanguage(code));
+        .map((code: string) => matchLanguage(code))
+        .filter((code: string | null): code is string => code !== null)
+        .map((code: string) => getLanguage(code));
     }
   } catch (e) {
     console.error("Failed to load supported languages", e);
