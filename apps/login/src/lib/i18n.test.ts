@@ -9,6 +9,20 @@ describe("vnpccc locales", () => {
     expect(codes).toContain("zh-TW");
     expect(codes).toContain("zh");
   });
+
+  it("hiện Tiếng Việt và 繁體中文 ĐẦU ô chọn", () => {
+    expect(LANGS.slice(0, 2).map((l) => l.code)).toEqual(["vi", "zh-TW"]);
+    expect(LANGS[0].name).toBe("Tiếng Việt");
+    expect(LANGS[1].name).toBe("繁體中文");
+  });
+
+  it("giữ nguyên ngôn ngữ upstream, không cắt bớt", () => {
+    const codes = LANGS.map((l) => l.code);
+    // Cắt bớt sẽ làm hỏng test gốc của Zitadel + chặn ui_locales
+    for (const code of ["en", "de", "fr", "ja", "ar"]) {
+      expect(codes, `mất ngôn ngữ upstream: ${code}`).toContain(code);
+    }
+  });
 });
 
 describe("matchLanguage", () => {

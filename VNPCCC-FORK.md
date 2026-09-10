@@ -51,21 +51,26 @@ vi-VN, vi                     → vi
 de-CH → de, en-US → en …             (như cũ)
 ```
 
-## Chỉ hiện 4 ngôn ngữ trong ô chọn (KHÔNG cần sửa code)
+## Ô chọn ngôn ngữ: 17 mục, 2 mục của ta lên đầu
 
-`LANGS` giữ nguyên 15 ngôn ngữ của upstream; muốn ô chọn chỉ còn 4 thì dùng
-đúng tính năng có sẵn của Zitadel — *restrictions* lọc bớt trong `LANGS`:
+Ô chọn hiện **Tiếng Việt · 繁體中文** trước, rồi tới 15 ngôn ngữ của upstream.
 
-```bash
-curl -X PUT "https://id.vnpccc.com/admin/v1/restrictions" \
-  -H "Authorization: Bearer $PAT_IAM_OWNER" \
-  -H "Content-Type: application/json" \
-  -d '{"allowedLanguages":{"list":["vi","zh-TW","zh","en"]}}'
-```
+**KHÔNG lọc xuống 4 được bằng cấu hình.** Tính năng *allowed languages* của
+Zitadel so khớp **chính xác từng mã** với danh sách sinh từ tên file
+`internal/api/ui/login/static/i18n/*.yaml` nằm trong binary lõi (đã đọc source
+`v4.16.1`: `internal/i18n/languages.go` → `MustLoadSupportedLanguagesFromDir`,
+`internal/command/restrictions.go` → `LanguagesAreSupported`). Danh sách đó
+không có `vi`, cũng không có `zh-TW` (chỉ có `zh`) → gửi 2 mã này vào
+restrictions là lỗi `Errors.Languages.NotSupported`.
 
-Đặt luôn ngôn ngữ mặc định của instance là `vi` trong Console → Settings →
-General. Không xoá bớt `LANGS` trong code: xoá là tự nhận thêm điểm đụng độ
-khi rebase, trong khi cấu hình làm được y hệt.
+Cắt bớt trong `LANGS` cũng đã thử và **bỏ**: nó làm hỏng 7 test gốc của
+Zitadel và chặn luôn `ui_locales=de`, đổi lấy mỗi việc ô chọn ngắn hơn. Thừa
+vài mục không hại ai. Muốn cắt thật thì sửa `LANGS` trong
+`apps/login/src/lib/i18n.ts` và sửa theo bộ test gốc.
+
+Vẫn nên đặt **ngôn ngữ mặc định của instance** hợp lý trong Console → Settings
+→ General (chỉ chọn được trong danh sách lõi hỗ trợ, nên `en`): người dùng
+không gửi `Accept-Language` khớp sẽ rơi về mặc định này.
 
 ## Bảo trì
 
